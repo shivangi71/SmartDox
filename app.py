@@ -30,7 +30,7 @@ load_dotenv()
 # Backend API configuration
 # For Streamlit Cloud: Set in Secrets section
 # For local: Use .env file or environment variable
-API_BASE_URL = "https://smartdox-3-2d0e.onrender.com"
+API_BASE_URL = "https://smartdox-backend.onrender.com"
 
 # Set request timeout for cloud deployments
 REQUEST_TIMEOUT = 30
