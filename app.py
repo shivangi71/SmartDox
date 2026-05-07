@@ -1,14 +1,25 @@
+"""
+SmartDOX - Frontend-Only Tender Evaluation Platform
+No backend server required - everything runs locally in Streamlit
+"""
+
 import streamlit as st
-import requests
 import pandas as pd
 from datetime import datetime
-import io
-from PIL import Image
-import fitz  # PyMuPDF
+import json
 import os
-from dotenv import load_dotenv
+from pathlib import Path
+from PIL import Image
+import io
 
-# Optional: pytesseract for OCR (requires Tesseract-OCR system package)
+# --- DOCUMENT PROCESSING ---
+try:
+    import fitz  # PyMuPDF
+    PYMUPDF_AVAILABLE = True
+except ImportError:
+    fitz = None
+    PYMUPDF_AVAILABLE = False
+
 try:
     import pytesseract
     TESSERACT_AVAILABLE = True
@@ -16,17 +27,36 @@ except ImportError:
     TESSERACT_AVAILABLE = False
     pytesseract = None
 
-# Page configuration
+# --- IMPORT LOCAL SERVICES ---
+from services import (
+    extract_criteria,
+    extract_bidder_data,
+    evaluate,
+    final_verdict,
+    generate_explanation,
+    translate_text,
+    get_supported_languages,
+    get_verdict_color,
+    create_report_summary,
+    format_results_for_display
+)
+
+# ═══════════════════════════════════════════════════════════════════
+# PAGE CONFIGURATION
+# ═══════════════════════════════════════════════════════════════════
+
 st.set_page_config(
-    page_title="SmartDOX - Tender Evaluation Platform",
+    page_title="SmartDOX - Tender Evaluation",
     page_icon="📋",
     layout="wide",
     initial_sidebar_state="expanded"
 )
 
-# Load environment variables
-load_dotenv()
+# ═══════════════════════════════════════════════════════════════════
+# CUSTOM STYLING
+# ═══════════════════════════════════════════════════════════════════
 
+<<<<<<< HEAD
 # Backend API configuration
 # For Streamlit Cloud: Set in Secrets section
 # For local: Use .env file or environment variable
@@ -44,6 +74,8 @@ if "is_logged_in" not in st.session_state:
     st.session_state.is_logged_in = False
 
 # Custom CSS
+=======
+>>>>>>> contributor/main
 st.markdown("""
     <style>
     .main-header {
@@ -57,14 +89,17 @@ st.markdown("""
     .status-pass {
         color: #28a745;
         font-weight: bold;
+        font-size: 1.1em;
     }
     .status-fail {
         color: #dc3545;
         font-weight: bold;
+        font-size: 1.1em;
     }
     .status-review {
         color: #ffc107;
         font-weight: bold;
+        font-size: 1.1em;
     }
     .evaluation-card {
         background-color: #f8f9fa;
@@ -73,516 +108,511 @@ st.markdown("""
         border-left: 4px solid #667eea;
         margin-bottom: 1rem;
     }
+    .verdict-pass {
+        background-color: #d4edda;
+        border: 1px solid #c3e6cb;
+        padding: 1.5rem;
+        border-radius: 10px;
+        color: #155724;
+        font-weight: bold;
+        font-size: 1.2em;
+    }
+    .verdict-fail {
+        background-color: #f8d7da;
+        border: 1px solid #f5c6cb;
+        padding: 1.5rem;
+        border-radius: 10px;
+        color: #721c24;
+        font-weight: bold;
+        font-size: 1.2em;
+    }
+    .verdict-review {
+        background-color: #fff3cd;
+        border: 1px solid #ffeaa7;
+        padding: 1.5rem;
+        border-radius: 10px;
+        color: #856404;
+        font-weight: bold;
+        font-size: 1.2em;
+    }
     </style>
 """, unsafe_allow_html=True)
 
-# Helper functions
+# ═══════════════════════════════════════════════════════════════════
+# SESSION STATE INITIALIZATION
+# ═══════════════════════════════════════════════════════════════════
+
+if "current_language" not in st.session_state:
+    st.session_state.current_language = "en"
+
+if "file_history" not in st.session_state:
+    st.session_state.file_history = []
+
+if "is_logged_in" not in st.session_state:
+    st.session_state.is_logged_in = True  # No authentication needed - frontend only
+
+# ═══════════════════════════════════════════════════════════════════
+# UTILITY FUNCTIONS
+# ═══════════════════════════════════════════════════════════════════
+
 def extract_text_from_file(uploaded_file):
     """Extract text from PDF or image files"""
     try:
         if uploaded_file.type == "application/pdf":
+            if not PYMUPDF_AVAILABLE:
+                st.error(
+                    "⚠️ **PyMuPDF is not installed**\n\n"
+                    "Please install it with: `pip install PyMuPDF`"
+                )
+                return None
+
             pdf_bytes = uploaded_file.read()
             doc = fitz.open(stream=pdf_bytes, filetype="pdf")
             text = ""
             for page in doc:
                 text += page.get_text()
             return text
+
         elif uploaded_file.type.startswith("image/"):
             if not TESSERACT_AVAILABLE:
-                st.error(
-                    "⚠️ **Tesseract-OCR is not installed**\n\n"
-                    "To process image files, please install Tesseract-OCR:\n\n"
-                    "**Windows:**\n"
-                    "1. Download from: https://github.com/UB-Mannheim/tesseract/wiki\n"
-                    "2. Run the installer (default path: C:\\Program Files\\Tesseract-OCR)\n"
-                    "3. Restart the app\n\n"
-                    "**For now:** Please upload PDF files instead, which don't require OCR."
+                st.warning(
+                    "⚠️ **Tesseract-OCR not available for image processing**\n\n"
+                    "For now, please use PDF files. To process images:\n"
+                    "1. Download: https://github.com/UB-Mannheim/tesseract/wiki\n"
+                    "2. Install (Windows: C:\\Program Files\\Tesseract-OCR)\n"
+                    "3. Run: `pip install pytesseract`"
                 )
                 return None
-            
+
             image = Image.open(uploaded_file)
-            # Try to find Tesseract executable
             tesseract_paths = [
                 r'C:\Program Files\Tesseract-OCR\tesseract.exe',
                 r'C:\Program Files (x86)\Tesseract-OCR\tesseract.exe',
             ]
-            
-            tesseract_found = False
+
             for path in tesseract_paths:
                 if os.path.exists(path):
                     pytesseract.pytesseract.tesseract_cmd = path
-                    tesseract_found = True
                     break
-            
-            if not tesseract_found:
-                st.error(
-                    "⚠️ **Tesseract-OCR not found at expected location**\n\n"
-                    "Please install from: https://github.com/UB-Mannheim/tesseract/wiki\n"
-                    "Default path: C:\\Program Files\\Tesseract-OCR"
-                )
-                return None
-            
+
             text = pytesseract.image_to_string(image)
-            return text
+            return text if text.strip() else None
+
         else:
             st.warning("Unsupported file type. Please upload PDF or image.")
             return None
+
     except Exception as e:
-        st.error(f"Error extracting text: {str(e)}\n\nFor image files, ensure Tesseract-OCR is installed.")
+        st.error(f"Error extracting text: {str(e)}")
         return None
 
-def signup_user(name, email, mobile, password):
-    """Register a new user"""
-    try:
-        response = requests.post(
-            f"{API_BASE_URL}/signup",
-            json={
-                "name": name,
-                "email": email,
-                "mobile": mobile,
-                "password": password
-            },
-            timeout=REQUEST_TIMEOUT
-        )
-        return response.json()
-    except requests.exceptions.Timeout:
-        return {"error": "Request timed out. Backend service may be loading."}
-    except requests.exceptions.ConnectionError:
-        return {"error": f"Cannot connect to backend: {API_BASE_URL}"}
-    except Exception as e:
-        return {"error": str(e)}
 
-def login_user(email, password):
-    """Authenticate user"""
-    try:
-        response = requests.post(
-            f"{API_BASE_URL}/login",
-            json={"email": email, "password": password},
-            timeout=REQUEST_TIMEOUT
-        )
-        return response.json()
-    except requests.exceptions.Timeout:
-        return {"error": "Request timed out. Backend service may be loading."}
-    except requests.exceptions.ConnectionError:
-        return {"error": f"Cannot connect to backend: {API_BASE_URL}"}
-    except Exception as e:
-        return {"error": str(e)}
+def save_to_history(filename, file_type):
+    """Save file to local history"""
+    entry = {
+        "filename": filename,
+        "type": file_type,
+        "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    }
+    st.session_state.file_history.append(entry)
 
-def upload_tender(file, user_id):
-    """Upload and process tender document"""
-    try:
-        files = {"file": (file.name, file.getvalue(), file.type)}
-        response = requests.post(
-            f"{API_BASE_URL}/upload-tender",
-            files=files,
-            params={"user_id": user_id},
-            timeout=REQUEST_TIMEOUT
-        )
-        return response.json()
-    except requests.exceptions.Timeout:
-        return {"error": "Request timed out. Please try again."}
-    except requests.exceptions.ConnectionError:
-        return {"error": f"Cannot connect to backend: {API_BASE_URL}"}
-    except Exception as e:
-        return {"error": str(e)}
 
-def evaluate_bidder(file, lang="en"):
-    """Evaluate bidder document"""
-    try:
-        files = {"file": (file.name, file.getvalue(), file.type)}
-        response = requests.post(
-            f"{API_BASE_URL}/evaluate-bidder",
-            files=files,
-            params={"lang": lang},
-            timeout=REQUEST_TIMEOUT
-        )
-        return response.json()
-    except requests.exceptions.Timeout:
-        return {"error": "Request timed out. Please try again."}
-    except requests.exceptions.ConnectionError:
-        return {"error": f"Cannot connect to backend: {API_BASE_URL}"}
-    except Exception as e:
-        return {"error": str(e)}
+def get_verdict_css_class(verdict):
+    """Get CSS class for verdict display"""
+    if "Eligible" in verdict and "Not" not in verdict:
+        return "verdict-pass"
+    elif "Not Eligible" in verdict:
+        return "verdict-fail"
+    else:
+        return "verdict-review"
 
-def get_file_history(user_id):
-    """Retrieve file upload history"""
-    try:
-        response = requests.get(
-            f"{API_BASE_URL}/history/{user_id}",
-            timeout=REQUEST_TIMEOUT
-        )
-        return response.json()
-    except requests.exceptions.Timeout:
-        return []
-    except requests.exceptions.ConnectionError:
-        return []
-    except Exception as e:
-        return []
 
-def chat_with_bot(message):
-    """Send message to chatbot"""
-    try:
-        response = requests.post(
-            f"{API_BASE_URL}/chat",
-            json={"message": message},
-            timeout=REQUEST_TIMEOUT
-        )
-        return response.json()
-    except requests.exceptions.Timeout:
-        return {"reply": "Request timed out. Please try again."}
-    except requests.exceptions.ConnectionError:
-        return {"reply": f"Cannot connect to backend: {API_BASE_URL}"}
-    except Exception as e:
-        return {"reply": f"Error: {str(e)}"}
+# ═══════════════════════════════════════════════════════════════════
+# MAIN APPLICATION
+# ═══════════════════════════════════════════════════════════════════
 
-# Authentication Section
-if not st.session_state.is_logged_in:
-    st.markdown("""
-        <div class="main-header">
-            <h1>🎯 SmartDOX</h1>
-            <p>AI-Powered Smart Tender Evaluation Platform</p>
-        </div>
-    """, unsafe_allow_html=True)
+# Display header
+st.markdown("""
+    <div class="main-header">
+        <h1>🎯 SmartDOX</h1>
+        <p>AI-Powered Smart Tender Evaluation Platform</p>
+        <p style="font-size: 0.9em; margin-top: 0.5rem;">✨ Frontend-Only • No Backend Required • Private & Local</p>
+    </div>
+""", unsafe_allow_html=True)
+
+# Show availability warnings
+if not PYMUPDF_AVAILABLE:
+    st.warning(
+        "⚠️ **PyMuPDF not installed** - PDF processing won't work.\n"
+        "Install with: `pip install PyMuPDF`"
+    )
+
+# Sidebar
+with st.sidebar:
+    st.markdown("### ⚙️ Settings")
     
-    # Show Tesseract warning if not available
-    if not TESSERACT_AVAILABLE:
-        st.warning(
-            "⚠️ **Optional: Tesseract-OCR not detected**\n\n"
-            "You can still use the app with PDF files. To process image files, "
-            "[install Tesseract-OCR](https://github.com/UB-Mannheim/tesseract/wiki)"
-        )
+    # Language selector
+    languages = get_supported_languages()
+    language_display = [f"{v}" for k, v in languages.items()]
+    language_keys = list(languages.keys())
+    
+    selected_lang = st.selectbox(
+        "Language",
+        language_keys,
+        format_func=lambda x: languages[x],
+        index=0
+    )
+    st.session_state.current_language = selected_lang
+    
+    st.markdown("---")
+    
+    # About section
+    st.markdown("### ℹ️ About")
+    st.info(
+        "**SmartDOX** is an AI-powered tender evaluation platform that helps "
+        "automatically extract criteria and evaluate bidder eligibility.\n\n"
+        "✨ **Features:**\n"
+        "- 📄 PDF & Image Processing\n"
+        "- 🤖 Smart Criteria Extraction\n"
+        "- 👥 Bidder Evaluation\n"
+        "- 📊 Detailed Reports\n"
+        "- 🌍 Multilingual Support\n"
+        "- 💾 Local History Tracking"
+    )
 
+# Create tabs for different functions
+tab1, tab2, tab3, tab4 = st.tabs(["🏠 Dashboard", "📄 Process Tender", "👥 Evaluate Bidder", "📋 History"])
+
+# ───────────────────────────────────────────────────────────────────
+# TAB 1: DASHBOARD
+# ───────────────────────────────────────────────────────────────────
+with tab1:
+    st.markdown("### 🎯 SmartDOX Dashboard")
+    
+    col1, col2, col3 = st.columns(3)
+    
+    with col1:
+        st.info("📄 **Process Tender Documents**\n\nExtract eligibility criteria from tender documents automatically using AI.")
+    
+    with col2:
+        st.success("👥 **Evaluate Bidder Submissions**\n\nMatch bidder documents against tender criteria.")
+    
+    with col3:
+        st.warning("📊 **Get Explainable Results**\n\nReceive transparent, audit-ready evaluation reports.")
+
+    st.markdown("---")
+    
     col1, col2 = st.columns(2)
     
     with col1:
-        st.subheader("📝 Sign Up")
-        with st.form("signup_form"):
-            signup_name = st.text_input("Full Name", key="signup_name")
-            signup_email = st.text_input("Email", key="signup_email")
-            signup_mobile = st.text_input("Mobile Number", key="signup_mobile")
-            signup_password = st.text_input("Password", type="password", key="signup_password")
-            signup_confirm = st.text_input("Confirm Password", type="password", key="signup_confirm")
-            
-            if st.form_submit_button("Create Account"):
-                if not all([signup_name, signup_email, signup_mobile, signup_password, signup_confirm]):
-                    st.error("Please fill all fields")
-                elif signup_password != signup_confirm:
-                    st.error("Passwords don't match")
-                else:
-                    response = signup_user(signup_name, signup_email, signup_mobile, signup_password)
-                    if "error" in response:
-                        st.error(f"Signup failed: {response['error']}")
-                    else:
-                        st.success("✅ Account created successfully! Please login.")
-
+        st.subheader("🎯 Key Features")
+        features = [
+            "✅ Automated document understanding",
+            "✅ OCR-based extraction from scanned PDFs",
+            "✅ Intelligent criteria matching",
+            "✅ Explainable AI decisions",
+            "✅ Multilingual support (8+ languages)",
+            "✅ Audit-ready reporting",
+            "✅ Completely local & private (no backend server)"
+        ]
+        for feature in features:
+            st.write(feature)
+    
     with col2:
-        st.subheader("🔐 Log In")
-        with st.form("login_form"):
-            login_email = st.text_input("Email", key="login_email")
-            login_password = st.text_input("Password", type="password", key="login_password")
-            
-            if st.form_submit_button("Login"):
-                if not login_email or not login_password:
-                    st.error("Please enter email and password")
-                else:
-                    response = login_user(login_email, login_password)
-                    if "error" in response or "message" not in response:
-                        st.error("Invalid credentials")
-                    else:
-                        st.session_state.is_logged_in = True
-                        st.session_state.user_id = response.get("user_id")
-                        st.session_state.username = response.get("name")
-                        st.rerun()
-
-else:
-    # Main Application (After Login)
-    # Sidebar navigation
-    sidebar = st.sidebar
-    sidebar.markdown("---")
-    
-    col_user, col_logout = sidebar.columns([3, 1])
-    with col_user:
-        sidebar.write(f"👤 Welcome, **{st.session_state.username}**")
-    with col_logout:
-        if sidebar.button("🚪 Logout", use_container_width=True):
-            st.session_state.is_logged_in = False
-            st.session_state.user_id = None
-            st.session_state.username = None
-            st.rerun()
-    
-    sidebar.markdown("---")
-    
-    # Navigation menu
-    menu_option = sidebar.radio(
-        "📌 Menu",
-        ["🏠 Dashboard", "📄 Process Tender", "👥 Evaluate Bidder", "📋 File History", "💬 Chatbot"]
-    )
-
-    # Dashboard
-    if menu_option == "🏠 Dashboard":
-        st.markdown("""
-            <div class="main-header">
-                <h1>🎯 SmartDOX Dashboard</h1>
-                <p>Automate and Standardize Tender Evaluation</p>
-            </div>
-        """, unsafe_allow_html=True)
-
-        col1, col2, col3 = st.columns(3)
+        st.subheader("📊 Supported File Formats")
+        formats = [
+            "📄 PDF documents (text & scanned)",
+            "🖼️ Images (JPG, PNG, GIF)",
+            "📋 Any document convertible to PDF"
+        ]
+        for fmt in formats:
+            st.write(fmt)
         
-        with col1:
-            st.info("📄 **Process Tender Documents**\n\nExtract eligibility criteria from tender documents automatically.")
-        
-        with col2:
-            st.success("👥 **Evaluate Bidder Submissions**\n\nMatch bidder documents against tender criteria.")
-        
-        with col3:
-            st.warning("📊 **Get Explainable Results**\n\nReceive transparent, audit-ready evaluation reports.")
-
         st.markdown("---")
-        
-        col1, col2 = st.columns(2)
-        
-        with col1:
-            st.subheader("🎯 Key Features")
-            features = [
-                "✅ Automated document understanding",
-                "✅ OCR-based extraction",
-                "✅ Intelligent criteria matching",
-                "✅ Explainable AI decisions",
-                "✅ Multilingual support",
-                "✅ Audit-ready reporting"
-            ]
-            for feature in features:
-                st.write(feature)
-        
-        with col2:
-            st.subheader("📊 Supported File Formats")
-            formats = [
-                "📄 PDF documents (typed & scanned)",
-                "🖼️ Images (JPG, PNG, etc.)",
-                "📋 Word files",
-                "📊 Tables and spreadsheets"
-            ]
-            for fmt in formats:
-                st.write(fmt)
+        st.markdown("### 🚀 Getting Started")
+        st.markdown("""
+        1. **Go to "Process Tender" tab** → Upload tender document
+        2. **Review extracted criteria**
+        3. **Go to "Evaluate Bidder" tab** → Upload bidder document  
+        4. **Get instant evaluation results**
+        """)
 
-    # Process Tender
-    elif menu_option == "📄 Process Tender":
-        st.markdown("### 📄 Upload & Process Tender Document")
-        st.write("Upload a tender document to extract eligibility criteria (turnover, projects, certifications, etc.)")
-
-        uploaded_tender = st.file_uploader(
-            "Choose a tender document",
-            type=["pdf", "jpg", "jpeg", "png", "gif"],
-            key="tender_uploader"
-        )
-
-        if uploaded_tender:
-            st.info(f"📁 File: **{uploaded_tender.name}**")
-            
-            if st.button("🔍 Process Tender", use_container_width=True):
-                with st.spinner("Processing tender document..."):
-                    response = upload_tender(uploaded_tender, st.session_state.user_id)
+# ───────────────────────────────────────────────────────────────────
+# TAB 2: PROCESS TENDER
+# ───────────────────────────────────────────────────────────────────
+with tab2:
+    st.markdown("### 📄 Upload & Process Tender Document")
+    st.write("Extract eligibility criteria (turnover, projects, certifications, etc.) from tender documents")
+    
+    st.markdown("---")
+    
+    uploaded_tender = st.file_uploader(
+        "Choose a tender document",
+        type=["pdf", "jpg", "jpeg", "png", "gif"],
+        key="tender_uploader"
+    )
+    
+    if uploaded_tender:
+        st.info(f"📁 File: **{uploaded_tender.name}** ({uploaded_tender.size / 1024:.1f} KB)")
+        
+        if st.button("🔍 Process Tender", use_container_width=True):
+            with st.spinner("🔄 Processing tender document..."):
+                text = extract_text_from_file(uploaded_tender)
                 
-                if "error" in response:
-                    st.error(f"Error: {response['error']}")
-                else:
-                    st.success("✅ Tender processed successfully!")
+                if text:
+                    criteria = extract_criteria(text)
+                    save_to_history(uploaded_tender.name, "tender")
                     
-                    criteria = response.get("criteria", {})
+                    # Display results
+                    st.success("✅ Tender processed successfully!")
+                    st.markdown("---")
                     
                     col1, col2 = st.columns(2)
                     
                     with col1:
-                        st.subheader("📋 Extracted Criteria")
-                        criteria_df = pd.DataFrame([
-                            {"Criterion": "Minimum Turnover", "Value": f"₹{criteria.get('turnover', 'N/A')} Crore"},
-                            {"Criterion": "Minimum Projects", "Value": criteria.get('projects', 'N/A')},
-                            {"Criterion": "GST Required", "Value": "✅ Yes" if criteria.get('gst') else "❌ No"},
-                            {"Criterion": "ISO Required", "Value": "✅ Yes" if criteria.get('iso') else "❌ No"}
-                        ])
-                        st.dataframe(criteria_df, use_container_width=True, hide_index=True)
-
-    # Evaluate Bidder
-    elif menu_option == "👥 Evaluate Bidder":
-        st.markdown("### 👥 Evaluate Bidder Document")
-        st.write("Upload a bidder document to evaluate against tender criteria")
-
-        col1, col2 = st.columns([2, 1])
-        
-        with col1:
-            uploaded_bidder = st.file_uploader(
-                "Choose a bidder document",
-                type=["pdf", "jpg", "jpeg", "png", "gif"],
-                key="bidder_uploader"
-            )
-        
-        with col2:
-            language = st.selectbox(
-                "📝 Language",
-                ["English", "Hindi", "Marathi"],
-                key="eval_language"
-            )
-
-        if uploaded_bidder:
-            st.info(f"📁 File: **{uploaded_bidder.name}**")
-            
-            if st.button("🔬 Evaluate Bidder", use_container_width=True):
-                lang_code = {"English": "en", "Hindi": "hi", "Marathi": "mr"}.get(language, "en")
-                
-                with st.spinner("Evaluating bidder document..."):
-                    response = evaluate_bidder(uploaded_bidder, lang=lang_code)
-                
-                if "error" in response:
-                    st.error(f"Error: {response['error']}")
-                else:
-                    st.success("✅ Evaluation completed!")
-                    
-                    # Display Bidder Data
-                    st.subheader("📊 Bidder Information")
-                    bidder_data = response.get("bidder_data", {})
-                    
-                    col1, col2, col3, col4 = st.columns(4)
-                    with col1:
-                        st.metric("Turnover", f"₹{bidder_data.get('turnover', 'N/A')} Cr")
-                    with col2:
-                        st.metric("Projects", bidder_data.get('projects', 'N/A'))
-                    with col3:
-                        st.metric("GST", "✅ Yes" if bidder_data.get('gst') else "❌ No")
-                    with col4:
-                        st.metric("ISO", "✅ Yes" if bidder_data.get('iso') else "❌ No")
-
-                    # Display Evaluation Results
-                    st.subheader("🎯 Evaluation Results")
-                    evaluation = response.get("evaluation", {})
-                    
-                    results_df = pd.DataFrame([
-                        {
-                            "Criterion": "Turnover",
-                            "Status": evaluation.get('turnover', 'N/A')
-                        },
-                        {
-                            "Criterion": "Projects",
-                            "Status": evaluation.get('projects', 'N/A')
-                        },
-                        {
-                            "Criterion": "GST",
-                            "Status": evaluation.get('gst', 'N/A')
-                        },
-                        {
-                            "Criterion": "ISO",
-                            "Status": evaluation.get('iso', 'N/A')
-                        }
-                    ])
-                    
-                    # Color code the status
-                    def color_status(val):
-                        if val == "PASS":
-                            return "background-color: #d4edda; color: #155724;"
-                        elif val == "FAIL":
-                            return "background-color: #f8d7da; color: #721c24;"
-                        else:
-                            return "background-color: #fff3cd; color: #856404;"
-                    
-                    st.dataframe(
-                        results_df.style.applymap(color_status, subset=["Status"]),
-                        use_container_width=True,
-                        hide_index=True
-                    )
-
-                    # Display Final Verdict
-                    verdict = response.get("verdict", "Needs Manual Review")
-                    
-                    if "Not Eligible" in verdict:
-                        st.error(f"❌ **Final Verdict: {verdict}**")
-                    elif "Needs Manual Review" in verdict:
-                        st.warning(f"⚠️ **Final Verdict: {verdict}**")
-                    else:
-                        st.success(f"✅ **Final Verdict: {verdict}**")
-
-                    # Display Explanation
-                    if "explanation" in response:
-                        st.subheader("📝 Detailed Explanation")
-                        explanation = response.get("explanation", {})
+                        st.markdown("#### 📋 Extracted Criteria")
                         
-                        for criterion, details in explanation.items():
-                            with st.expander(f"🔍 {criterion.upper()}", expanded=False):
-                                col1, col2 = st.columns(2)
-                                with col1:
-                                    st.write(f"**Status:** {details.get('status', 'N/A')}")
-                                    st.write(f"**Required:** {details.get('required', 'N/A')}")
-                                with col2:
-                                    st.write(f"**Found:** {details.get('found', 'N/A')}")
-                                    st.write(f"**Reason:** {details.get('reason', 'N/A')}")
+                        if criteria.get("turnover"):
+                            st.metric(
+                                "Minimum Turnover",
+                                f"₹{criteria['turnover']} Crore",
+                                delta="Required"
+                            )
+                        else:
+                            st.metric(
+                                "Minimum Turnover",
+                                "Not Specified",
+                                delta="Optional"
+                            )
+                        
+                        if criteria.get("projects"):
+                            st.metric(
+                                "Minimum Projects",
+                                f"{criteria['projects']} Projects",
+                                delta="Required"
+                            )
+                        else:
+                            st.metric(
+                                "Minimum Projects",
+                                "Not Specified",
+                                delta="Optional"
+                            )
+                    
+                    with col2:
+                        st.markdown("#### 📌 Certifications")
+                        
+                        if criteria.get("gst"):
+                            st.success("✅ GST Registration Required")
+                        else:
+                            st.info("➖ GST Registration Not Required")
+                        
+                        if criteria.get("iso"):
+                            st.success("✅ ISO Certification Required")
+                        else:
+                            st.info("➖ ISO Certification Not Required")
+                    
+                    st.markdown("---")
+                    
+                    # Show raw extracted text
+                    with st.expander("👀 View Extracted Text"):
+                        st.text(text[:2000] + "..." if len(text) > 2000 else text)
+                    
+                    # Store criteria in session for later use
+                    st.session_state.current_criteria = criteria
+                    st.success("💾 Criteria saved! Go to 'Evaluate Bidder' to compare against bids.")
+                else:
+                    st.error("❌ Could not extract text from file. Please try another document.")
 
-    # File History
-    elif menu_option == "📋 File History":
-        st.markdown("### 📋 Your File Upload History")
+# ───────────────────────────────────────────────────────────────────
+# TAB 3: EVALUATE BIDDER
+# ───────────────────────────────────────────────────────────────────
+with tab3:
+    st.markdown("### 👥 Upload & Evaluate Bidder Document")
+    st.write("Evaluate if bidder meets the tender requirements")
+    
+    st.markdown("---")
+    
+    # Check if criteria has been extracted
+    if "current_criteria" not in st.session_state:
+        st.warning("⚠️ Please process a tender document first to extract criteria.")
+        st.info("💡 Go to 'Process Tender' tab above to extract criteria from a tender document.")
+    else:
+        criteria = st.session_state.current_criteria
         
-        with st.spinner("Loading history..."):
-            history = get_file_history(st.session_state.user_id)
+        # Show current criteria
+        with st.expander("📋 View Current Criteria"):
+            col1, col2 = st.columns(2)
+            with col1:
+                st.write("**Turnover Required:**", criteria.get("turnover", "Not specified"))
+                st.write("**Projects Required:**", criteria.get("projects", "Not specified"))
+            with col2:
+                st.write("**GST Required:**", "✅ Yes" if criteria.get("gst") else "❌ No")
+                st.write("**ISO Required:**", "✅ Yes" if criteria.get("iso") else "❌ No")
         
-        if isinstance(history, list) and len(history) > 0:
-            history_df = pd.DataFrame(history)
+        st.markdown("---")
+        
+        # Upload bidder document
+        uploaded_bidder = st.file_uploader(
+            "Choose a bidder document",
+            type=["pdf", "jpg", "jpeg", "png", "gif"],
+            key="bidder_uploader"
+        )
+        
+        if uploaded_bidder:
+            st.info(f"📁 File: **{uploaded_bidder.name}** ({uploaded_bidder.size / 1024:.1f} KB)")
             
-            # Format date column
-            if "date" in history_df.columns:
-                history_df["date"] = pd.to_datetime(history_df["date"]).dt.strftime("%Y-%m-%d %H:%M:%S")
-            
-            st.dataframe(
-                history_df,
-                use_container_width=True,
-                hide_index=True,
-                column_config={
-                    "id": st.column_config.NumberColumn("ID"),
-                    "filename": st.column_config.TextColumn("File Name"),
-                    "date": st.column_config.TextColumn("Upload Date")
-                }
-            )
-        else:
-            st.info("📭 No files uploaded yet. Start by processing a tender document!")
+            if st.button("🔍 Evaluate Bidder", use_container_width=True):
+                with st.spinner("🔄 Processing bidder document and evaluating..."):
+                    text = extract_text_from_file(uploaded_bidder)
+                    
+                    if text:
+                        # Extract bidder data
+                        bidder_data = extract_bidder_data(text)
+                        
+                        # Evaluate
+                        results = evaluate(criteria, bidder_data)
+                        verdict = final_verdict(results)
+                        explanation = generate_explanation(criteria, bidder_data, results)
+                        
+                        # Save to history
+                        save_to_history(uploaded_bidder.name, "bidder")
+                        
+                        # Translate if needed
+                        current_lang = st.session_state.current_language
+                        if current_lang != "en":
+                            with st.spinner(f"🌍 Translating results to {current_lang}..."):
+                                verdict = translate_text(verdict, current_lang)
+                                explanation = translate_text(explanation, current_lang)
+                        
+                        st.success("✅ Evaluation completed!")
+                        st.markdown("---")
+                        
+                        # Display Verdict
+                        verdict_class = get_verdict_css_class(verdict)
+                        st.markdown(f"""
+                            <div class="{verdict_class}">
+                            🎯 FINAL VERDICT: {verdict}
+                            </div>
+                        """, unsafe_allow_html=True)
+                        
+                        st.markdown("---")
+                        
+                        # Bidder Information
+                        st.markdown("#### 📊 Bidder Information")
+                        col1, col2 = st.columns(2)
+                        
+                        with col1:
+                            st.write("**Company Name:**", bidder_data.get("company_name", "Unknown"))
+                            st.write("**Turnover:**", f"₹{bidder_data.get('turnover')} Crore" if bidder_data.get('turnover') else "Not Found")
+                        
+                        with col2:
+                            st.write("**Project Experience:**", f"{bidder_data.get('projects')} Projects" if bidder_data.get('projects') else "Not Found")
+                            st.write("**Registration Number:**", bidder_data.get("registration_number", "Not Found"))
+                        
+                        st.write("**GST Status:**", "✅ Registered" if bidder_data.get("gst") else "❌ Not Registered")
+                        st.write("**ISO Status:**", "✅ Certified" if bidder_data.get("iso") else "❌ Not Certified")
+                        
+                        st.markdown("---")
+                        
+                        # Evaluation Results
+                        st.markdown("#### ✅ Evaluation Results")
+                        
+                        eval_cols = st.columns(4)
+                        criteria_keys = ["turnover", "projects", "gst", "iso"]
+                        criteria_names = ["Turnover", "Experience", "GST", "ISO"]
+                        
+                        for i, (key, name) in enumerate(zip(criteria_keys, criteria_names)):
+                            with eval_cols[i]:
+                                status = results.get(key, "N/A")
+                                if status == "PASS":
+                                    st.success(f"✅ {name}\n**PASS**")
+                                elif status == "FAIL":
+                                    st.error(f"❌ {name}\n**FAIL**")
+                                elif status == "REVIEW":
+                                    st.warning(f"⚠️ {name}\n**REVIEW**")
+                                else:
+                                    st.info(f"➖ {name}\n**N/A**")
+                        
+                        st.markdown("---")
+                        
+                        # Detailed Explanation
+                        st.markdown("#### 📝 Detailed Explanation")
+                        
+                        for criteria_key, criteria_name in zip(criteria_keys, criteria_names):
+                            if criteria_key in explanation:
+                                exp = explanation[criteria_key]
+                                
+                                if exp["status"] == "PASS":
+                                    color = "🟢"
+                                elif exp["status"] == "FAIL":
+                                    color = "🔴"
+                                elif exp["status"] == "REVIEW":
+                                    color = "🟡"
+                                else:
+                                    color = "⚪"
+                                
+                                with st.expander(f"{color} {criteria_name} - {exp['status']}"):
+                                    st.write(f"**Status:** {exp['status']}")
+                                    st.write(f"**Required:** {exp['required']}")
+                                    st.write(f"**Found:** {exp['found']}")
+                                    st.write(f"**Analysis:** {exp['reason']}")
+                        
+                        st.markdown("---")
+                        
+                        # Generate Report
+                        st.markdown("#### 📄 Generate Report")
+                        
+                        report = create_report_summary(bidder_data, criteria, results, explanation, verdict)
+                        
+                        if st.button("📥 Download Text Report"):
+                            st.download_button(
+                                label="Download Report (.txt)",
+                                data=report,
+                                file_name=f"evaluation_{datetime.now().strftime('%Y%m%d_%H%M%S')}.txt",
+                                mime="text/plain"
+                            )
+                        
+                        st.markdown("---")
+                        
+                        # Show raw text
+                        with st.expander("👀 View Extracted Bidder Text"):
+                            st.text(text[:2000] + "..." if len(text) > 2000 else text)
+                    
+                    else:
+                        st.error("❌ Could not extract text from bidder document. Please try another document.")
 
-    # Chatbot
-    elif menu_option == "💬 Chatbot":
-        st.markdown("### 💬 SmartDOX Assistant")
-        st.write("Ask questions about the tender evaluation process, criteria matching, or get help with the platform.")
+# ───────────────────────────────────────────────────────────────────
+# TAB 4: FILE HISTORY
+# ───────────────────────────────────────────────────────────────────
+with tab4:
+    st.markdown("### 📋 File Processing History")
+    
+    if not st.session_state.file_history:
+        st.info("📭 No files processed yet. Start by uploading a tender or bidder document.")
+    else:
+        history_df = pd.DataFrame(st.session_state.file_history)
+        
+        st.markdown(f"**Total files processed:** {len(st.session_state.file_history)}")
+        
+        st.dataframe(
+            history_df.sort_values("timestamp", ascending=False),
+            use_container_width=True,
+            hide_index=True
+        )
+        
+        if st.button("🗑️ Clear History"):
+            st.session_state.file_history = []
+            st.success("History cleared!")
+            st.rerun()
 
-        # Chat history in session state
-        if "chat_history" not in st.session_state:
-            st.session_state.chat_history = []
+# ═══════════════════════════════════════════════════════════════════
+# FOOTER
+# ═══════════════════════════════════════════════════════════════════
 
-        # Display chat history
-        for message in st.session_state.chat_history:
-            with st.chat_message(message["role"]):
-                st.markdown(message["content"])
-
-        # User input
-        if user_input := st.chat_input("Ask me anything..."):
-            # Display user message
-            with st.chat_message("user"):
-                st.markdown(user_input)
-            
-            # Add to history
-            st.session_state.chat_history.append({"role": "user", "content": user_input})
-            
-            # Get bot response
-            with st.spinner("Thinking..."):
-                response = chat_with_bot(user_input)
-            
-            bot_reply = response.get("reply", "Sorry, I couldn't process that.")
-            
-            # Display bot message
-            with st.chat_message("assistant"):
-                st.markdown(bot_reply)
-            
-            # Add to history
-            st.session_state.chat_history.append({"role": "assistant", "content": bot_reply})
-
-# Footer
 st.markdown("---")
 st.markdown("""
-    <div style="text-align: center; color: #666; font-size: 0.9rem;">
-        <p>SmartDOX v1.0 | AI-Powered Smart Tender Evaluation Platform</p>
-        <p>© 2024 SmartDOX. All rights reserved.</p>
-    </div>
+<div style='text-align: center; color: #888; font-size: 0.9em;'>
+    <p>🎯 SmartDOX v2.0 • Frontend-Only Edition • All processing done locally on your machine</p>
+    <p>💡 No backend required • No data sent to external servers • 100% Private</p>
+</div>
 """, unsafe_allow_html=True)

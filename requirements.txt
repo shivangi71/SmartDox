@@ -1,0 +1,21 @@
+# SmartDOX v2.0 - Frontend-Only Tender Evaluation Platform
+# Updated: 2024 - No Backend Server Required
+# All processing is done locally on your machine
+
+# Core UI Framework
+streamlit>=1.28.0
+
+# Document Processing
+PyMuPDF>=1.23.0  # PDF text extraction
+Pillow>=10.0.0  # Image handling and OCR support
+pytesseract>=0.3.10  # OCR for scanned PDFs (optional - requires Tesseract-OCR)
+
+# Translation & Language Support
+deep-translator>=1.11.4  # Google Translate API (free, no key required)
+
+# Data Processing & Analysis
+pandas>=2.0.0
+numpy>=1.24.0
+
+# Utilities
+python-dotenv>=1.0.0
