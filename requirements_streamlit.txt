@@ -1,0 +1,26 @@
+# Streamlit Core
+streamlit==1.35.0
+
+# API & HTTP
+requests==2.31.0
+
+# Data Processing
+pandas==2.1.4
+numpy==1.24.3
+
+# Document Processing
+PyMuPDF==1.24.2
+pytesseract==0.3.10  # Optional: Requires Tesseract-OCR system package (see INSTALL_TESSERACT.md)
+Pillow==10.0.1
+
+# Environment Management
+python-dotenv==1.0.0
+
+# Additional Utilities
+deep-translator==1.11.4
+
+# Optional: Uncomment below if you want to support more document formats
+# python-pptx==0.6.21  # For PowerPoint files
+# openpyxl==3.1.2      # For Excel files
+# docx2pdf==1.5        # For Word to PDF conversion
+

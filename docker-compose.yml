@@ -1,0 +1,38 @@
+version: '3.8'
+
+services:
+  streamlit:
+    build: .
+    container_name: smartdox-streamlit
+    ports:
+      - "8501:8501"
+    environment:
+      - API_BASE_URL=http://backend:8000
+      - STREAMLIT_SERVER_PORT=8501
+      - STREAMLIT_SERVER_ADDRESS=0.0.0.0
+      - STREAMLIT_SERVER_HEADLESS=true
+    depends_on:
+      - backend
+    restart: unless-stopped
+    networks:
+      - smartdox-network
+
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: smartdox-backend
+    ports:
+      - "8000:8000"
+    environment:
+      - GROQ_API_KEY=${GROQ_API_KEY}
+      - DATABASE_URL=sqlite:///./smartdox.db
+    restart: unless-stopped
+    networks:
+      - smartdox-network
+    volumes:
+      - ./backend:/app
+
+networks:
+  smartdox-network:
+    driver: bridge
