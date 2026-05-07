@@ -23,5 +23,5 @@ deep-translator==1.11.4
 # python-pptx==0.6.21  # For PowerPoint files
 # openpyxl==3.1.2      # For Excel files
 # docx2pdf==1.5        # For Word to PDF conversion
-PyMuPDF
+
 
